@@ -1,6 +1,10 @@
 # .github/workflows/docker-publish.yml
 name: Build and Push Docker Image to GHCR
 
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
 
 jobs:
   build_and_push:
