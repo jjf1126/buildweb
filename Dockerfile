@@ -19,10 +19,31 @@ RUN npm install --production
 # 3. 【核心优化】将浏览器下载和解压作为独立的一层。
 # 只要CAMOUFOX_URL不变，这一层就会被缓存。这层体积最大，缓存命中至关重要。
 ARG CAMOUFOX_URL
-RUN curl -sSL ${CAMOUFOX_URL} -o camoufox-linux.tar.gz && \
-    tar -xzf camoufox-linux.tar.gz && \
-    rm camoufox-linux.tar.gz && \
-    chmod +x /app/camoufox-linux/camoufox
+RUN \
+    echo "--- Downloading from URL: ${CAMOUFOX_URL} ---" && \
+    test -n "${CAMOUFOX_URL}" && \
+    \
+    apt-get update && \
+    apt-get install -y --no-install-recommends unzip curl && \
+    \
+    echo "--- Starting download ---" && \
+    curl -fsSL ${CAMOUFOX_URL} -o camoufox-linux.zip && \
+    \
+    echo "--- Download finished, checking file ---" && \
+    ls -lh camoufox-linux.zip && \
+    \
+    echo "--- Creating directory and unzipping ---" && \
+    mkdir -p /app/camoufox-linux && \
+    # --- [核心修正] 忽略 unzip 的警告退出码 ---
+    unzip camoufox-linux.zip -d /app/camoufox-linux || true && \
+    \
+    echo "--- Cleaning up ---" && \
+    rm camoufox-linux.zip && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# 然后再给其中的文件添加执行权限
+RUN chmod +x /app/camoufox-linux/camoufox
 
 # 4. 【核心优化】现在，才拷贝你经常变动的代码文件。
 # 这一步放在后面，确保你修改代码时，前面所有重量级的层都能利用缓存。
