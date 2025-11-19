@@ -1,14 +1,21 @@
-# .github/workflows/docker-publish.yml (正确版本 - 推送到 GHCR)
+# .github/workflows/docker-publish.yml
 name: Build and Push Docker Image to GHCR
 
 on:
-  push:
-    branches: ["main"] # 当 main 分支有更新时触发
-  workflow_dispatch: {} # <--- 加上这行
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Docker image version tag (e.g., v1.0, v1.1-alpha)"
+        required: true
+        default: "v2"
+      update_latest:
+        description: 'Update the "latest" tag as well?'
+        type: boolean
+        default: false
+
 jobs:
   build_and_push:
     runs-on: ubuntu-latest
-    # 【新增】授予 Actions 工作流写入 GitHub Packages 的权限
     permissions:
       contents: read
       packages: write
@@ -17,33 +24,40 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get Camoufox Download URL
-        id: get_camoufox_url
-        run: |
-          URL=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/latest" | grep "browser_download_url.*camoufox-linux.tar.gz" | cut -d : -f 2,3 | tr -d '", ')
-          echo "CAMOUFOX_URL=$URL" >> $GITHUB_ENV
+      # =================================================================
+      # ===          步骤1：删除了动态获取 URL 的步骤 (Get Camoufox Download URL)         ===
+      # =================================================================
 
-      # --- 【核心修改 1】登录到 GitHub Container Registry (ghcr.io) ---
-      - name: Log in to GitHub Container Registry
+      - name: Log in to the GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}         # 你的 GitHub 用户名, butteryiyi
-          password: ${{ secrets.GITHUB_TOKEN }} # 使用 GitHub 自动生成的安全令牌
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build and push Docker image
+        id: build-and-push
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           push: true
-          # --- 【核心修改 2】将镜像标签指向 ghcr.io ---
-          # ${{ github.repository }} 会自动变成 butteryiyi/web
-          tags: ghcr.io/${{ github.repository }}:latest 
+          tags: ghcr.io/${{ github.repository_owner }}/cloud-studio:${{ github.event.inputs.version }}
+          # =================================================================
+          # ===              步骤2：在这里手动写入您的 URL              ===
+          # =================================================================
+          # 请将下面的 URL 替换为您 Release 附件的真实下载链接
           build-args: |
-            CAMOUFOX_URL=${{ env.CAMOUFOX_URL }}
+            CAMOUFOX_URL=https://github.com/daijro/camoufox/releases/download/v135.0.1-beta.24/camoufox-135.0.1-beta.24-lin.x86_64.zip
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Tag and push latest
+        if: github.event.inputs.update_latest == true
+        run: |
+          IMAGE_ID=$(docker inspect --format='{{.Id}}' ghcr.io/${{ github.repository_owner }}/buildweb:${{ github.event.inputs.version }})
+          docker tag $IMAGE_ID ghcr.io/${{ github.repository_owner }}/buildweb:latest
+          docker push ghcr.io/${{ github.repository_owner }}/buildweb:latest
