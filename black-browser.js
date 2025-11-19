@@ -187,6 +187,12 @@ class DataFetcher {
       ? requestSpec.path.substring(1)
       : requestSpec.path;
     const queryParams = new URLSearchParams(requestSpec.query_params);
+    
+    if (pathSegment.includes("-search:")) {
+      pathSegment = pathSegment.replace("-search:", ":");
+      Logger.output(`检测到 "-search" 后缀，已修正API路径为: ${pathSegment}`);
+    }
+
     if (requestSpec.streaming_mode === "fake") {
       Logger.output("模拟流式模式激活，正在修改请求...");
       if (pathSegment.includes(":streamGenerateContent")) {
@@ -228,6 +234,21 @@ class DataFetcher {
     ) {
       try {
         let bodyObj = JSON.parse(requestSpec.body);
+
+        // --- 模块0：根据 "-search" 后缀智能联网 ---
+        if (requestSpec.path.includes("-search:")) {
+          if (!bodyObj.tools) {
+            // =================================================================
+            // ===                 *** 此处代码已修改 ***                 ===
+            // =================================================================
+            bodyObj.tools = [{
+              "google_search": {} // 使用新的工具名称
+            }];
+            Logger.output("✅ 检测到 '-search' 后缀，已为请求开启联网模式。");
+          }
+        }
+
+        // --- 模块1：智能过滤 ---
         const isImageModel =
           requestSpec.path.includes("-image-") ||
           requestSpec.path.includes("imagen");
@@ -367,6 +388,13 @@ class PageWorker extends EventTarget {
       }
 
       this._transmitHeaders(response, operationId);
+
+      // 如果是HEAD请求，可能没有body，直接结束
+      if (!response.body) {
+          this._transmitStreamEnd(operationId);
+          return;
+      }
+
       const reader = response.body.getReader();
       const textDecoder = new TextDecoder();
       let fullBody = "";
