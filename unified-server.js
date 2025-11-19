@@ -1104,6 +1104,10 @@ class TaskHandler {
     }
   }
 
+
+
+
+  
   // [伪装] 函数名和日志修改
   _cancelTaskInBrowser(taskId) {
     const connection = this.connectionRegistry.getFirstConnection();
@@ -1166,6 +1170,85 @@ class TaskHandler {
     }
   }
 
+
+// [修改] 动态获取模型列表：设定适中的 pageSize 以覆盖所有活跃模型
+ async processModelListRequest(req, res) {
+   const requestId = this._generateRequestId();
+  
+   const proxyRequest = this._buildProxyRequest(req, requestId);
+ 
+   // 1. 强制指向 v1beta (通常模型最全)
+   proxyRequest.path = "/v1beta/models";
+   proxyRequest.method = "GET";
+   proxyRequest.body = null;
+   proxyRequest.is_generative = false;
+   proxyRequest.streaming_mode = "fake";
+   proxyRequest.client_wants_stream = false;
+  
+   // 2. [关键修正] 设置一个“适中”的 pageSize。
+   // - 不传(默认): 可能只有 32 个 (你的现状)
+   // - 传 1000: 会拉到大量历史废弃模型 (你之前觉得太多)
+   // - 传 100: 足以覆盖当前的 ~37 个活跃模型，又不会拉取太古老的版本
+   proxyRequest.query_params = { ...req.query, pageSize: 100 };
+
+   this.logger.info(`[Adapter] 收到获取模型列表请求，正在转发至Google (pageSize=100)... (Request ID: ${requestId})`);
+  
+   const messageQueue = this.connectionRegistry.createMessageQueue(requestId);
+
+   try {
+     this._forwardRequest(proxyRequest);
+    
+     const headerMessage = await messageQueue.dequeue();
+     if (headerMessage.event_type === "error") {
+       throw new Error(headerMessage.message || "Upstream error");
+     }
+
+     let fullBody = "";
+     while (true) {
+       const message = await messageQueue.dequeue(60000);
+       if (message.type === "STREAM_END") break;
+       if (message.event_type === "chunk" && message.data) {
+         fullBody += message.data;
+       }
+     }
+
+     let googleModels = [];
+     try {
+       const googleResponse = JSON.parse(fullBody);
+       googleModels = googleResponse.models || [];
+     } catch (e) {
+       this.logger.warn(`[Adapter] 解析模型列表JSON失败: ${e.message}`);
+     }
+    
+     const openaiModels = googleModels.map(model => {
+       const id = model.name.replace("models/", "");
+       return {
+         id: id,
+         object: "model",
+         created: Math.floor(Date.now() / 1000),
+         owned_by: "google",
+         permission: [],
+         root: id,
+         parent: null
+       };
+     });
+
+     res.status(200).json({
+       object: "list",
+       data: openaiModels
+     });
+    
+     this.logger.info(`[Adapter] 成功获取并返回了 ${openaiModels.length} 个模型。`);
+
+   } catch (error) {
+     this.logger.error(`[Adapter] 获取模型列表失败: ${error.message}`);
+     this._sendErrorResponse(res, 500, "Failed to fetch model list.");
+   } finally {
+     this.connectionRegistry.removeMessageQueue(requestId);
+   }
+ }
+  
+  
   async _handlePseudoStreamResponse(taskData, messageQueue, req, res) {
     this.logger.info(
       "[Task] 客户端启用流式传输 (fake)，进入模拟流式处理模式..."
