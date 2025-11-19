@@ -45,7 +45,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/buildweb:${{ github.event.inputs.version }}
+          tags: ghcr.io/${{ github.repository }}:latest
           # =================================================================
           # ===              步骤2：在这里手动写入您的 URL              ===
           # =================================================================
@@ -55,9 +55,3 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Tag and push latest
-        if: github.event.inputs.update_latest == true
-        run: |
-          IMAGE_ID=$(docker inspect --format='{{.Id}}' ghcr.io/${{ github.repository_owner }}/buildweb:${{ github.event.inputs.version }})
-          docker tag $IMAGE_ID ghcr.io/${{ github.repository_owner }}/buildweb:latest
-          docker push ghcr.io/${{ github.repository_owner }}/buildweb:latest
